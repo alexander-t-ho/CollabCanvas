@@ -1,26 +1,10 @@
 import React from 'react';
+import './App.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CanvasProvider } from './contexts/CanvasContext';
 import { UserProfileProvider } from './contexts/UserProfileContext';
 import Login from './components/Auth/Login';
 import Canvas from './components/Canvas/Canvas';
-import { useRealtimeSync } from './hooks/useRealtimeSync';
-
-const CanvasApp: React.FC = () => {
-  useRealtimeSync(); // Make sure this is called!
-  
-  return (
-    <Canvas />
-  );
-};
-
-const App: React.FC = () => {
-  return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
-};
 
 const AppContent: React.FC = () => {
   const { currentUser, loading } = useAuth();
@@ -28,7 +12,7 @@ const AppContent: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        Loading...
+        <div>Loading...</div>
       </div>
     );
   }
@@ -40,10 +24,18 @@ const AppContent: React.FC = () => {
   return (
     <CanvasProvider>
       <UserProfileProvider>
-        <CanvasApp />
+        <Canvas />
       </UserProfileProvider>
     </CanvasProvider>
   );
 };
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
 
 export default App;

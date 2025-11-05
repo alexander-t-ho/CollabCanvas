@@ -1,9 +1,25 @@
 import OpenAI from 'openai';
 import { CanvasObject } from '../types';
 
+// Get API key from environment
+const apiKey = process.env.REACT_APP_OPENAI_API_KEY;
+
+// Validate API key exists
+if (!apiKey) {
+  console.error('❌ OPENAI_API_KEY is not set in environment variables');
+  console.error('Please set REACT_APP_OPENAI_API_KEY in your .env.local file');
+} else {
+  // Validate API key format (should start with 'sk-')
+  if (!apiKey.startsWith('sk-')) {
+    console.warn('⚠️ OPENAI_API_KEY format may be incorrect. Expected format: sk-...');
+  } else {
+    console.log('✅ OpenAI API key loaded successfully');
+  }
+}
+
 // Initialize OpenAI client
 const openai = new OpenAI({
-  apiKey: process.env.REACT_APP_OPENAI_API_KEY,
+  apiKey: apiKey || '', // Fallback to empty string if not set
   dangerouslyAllowBrowser: true // Only for demo - in production, use a backend
 });
 
@@ -44,6 +60,47 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           }
         },
         required: ['type', 'x', 'y', 'width', 'height', 'color']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'createPolygon',
+      description: 'Create a polygon shape (triangle, square, pentagon, hexagon, etc.) on the canvas. Use this for triangles (3 sides), pentagons (5 sides), hexagons (6 sides), and other polygons.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sides: {
+            type: 'number',
+            description: 'Number of sides (3 = triangle, 4 = square, 5 = pentagon, 6 = hexagon, etc.). Minimum: 3, Maximum: 64.'
+          },
+          x: {
+            type: 'number',
+            description: 'X coordinate position (0 is center)'
+          },
+          y: {
+            type: 'number',
+            description: 'Y coordinate position (0 is center)'
+          },
+          sideLength: {
+            type: 'number',
+            description: 'Length of each side in pixels (default: 100). For triangles, use 100-150 for a good size.'
+          },
+          color: {
+            type: 'string',
+            description: 'Hex color code (e.g., #FF0000 for red)'
+          },
+          width: {
+            type: 'number',
+            description: 'Optional: Overall width of the polygon bounding box (auto-calculated if not provided)'
+          },
+          height: {
+            type: 'number',
+            description: 'Optional: Overall height of the polygon bounding box (auto-calculated if not provided)'
+          }
+        },
+        required: ['sides', 'x', 'y', 'color']
       }
     }
   },
@@ -292,7 +349,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: 'arrangeShapes',
-      description: 'Arrange multiple shapes in a pattern (horizontal, vertical, or grid). Spacing is center-to-center distance.',
+      description: 'Arrange multiple shapes in a pattern (horizontal, vertical, or grid). Spacing is center-to-center distance. Use filterType to specify which shapes to arrange (e.g., "circle", "rectangle", "polygon"). Use filterColor to filter by color.',
       parameters: {
         type: 'object',
         properties: {
@@ -300,6 +357,14 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
             type: 'string',
             enum: ['horizontal', 'vertical', 'grid'],
             description: 'How to arrange the shapes'
+          },
+          filterType: {
+            type: 'string',
+            description: 'Optional: Filter shapes by type (e.g., "circle", "rectangle", "polygon", "ellipse"). If not specified, arranges all shapes.'
+          },
+          filterColor: {
+            type: 'string',
+            description: 'Optional: Filter shapes by color (hex code like "#FF0000" or color name like "red"). If specified with filterType, both must match.'
           },
           spacing: {
             type: 'number',
@@ -519,15 +584,37 @@ export async function processAICommand(
   canvasObjects: CanvasObject[]
 ): Promise<AICommandResult> {
   try {
-    // Get info about recently created objects for context (without z-index to avoid AI second-guessing)
-    const recentObjects = canvasObjects.slice(-5).map(obj => ({
-      type: obj.type,
-      color: obj.fill,
-      x: obj.x,
-      y: obj.y,
-      width: obj.width,
-      height: obj.height
-    }));
+    // Get info about all objects for context - include type, color, sides (for polygons), and other identifying features
+    const allObjectsInfo = canvasObjects.map(obj => {
+      const objInfo: any = {
+        type: obj.type,
+        color: obj.fill,
+        x: obj.x,
+        y: obj.y,
+        width: obj.width,
+        height: obj.height
+      };
+      
+      // Add type-specific properties for better identification
+      if (obj.type === 'polygon' && obj.sides) {
+        objInfo.sides = obj.sides;
+        objInfo.shapeDescription = `${obj.sides}-sided polygon`;
+      }
+      if (obj.type === 'ellipse') {
+        objInfo.shapeDescription = 'ellipse';
+      }
+      if (obj.nickname) {
+        objInfo.nickname = obj.nickname;
+      }
+      if (obj.text) {
+        objInfo.text = obj.text;
+      }
+      
+      return objInfo;
+    });
+    
+    // Recent objects for quick reference
+    const recentObjects = allObjectsInfo.slice(-5);
 
     // Build system message with current context
     const systemMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
@@ -603,15 +690,38 @@ DEFAULT SIZES:
 CURRENT CANVAS STATE (REAL-TIME):
 - Total objects: ${canvasObjects.length}
 - Recent objects: ${JSON.stringify(recentObjects)}
+- All objects: ${JSON.stringify(allObjectsInfo)}
 - DO NOT analyze or check layer order - just execute layer commands when requested
+
+OBJECT STRUCTURE UNDERSTANDING:
+- Each object has: type (rectangle, circle, polygon, ellipse, line, text, image, group), color (fill), position (x, y), size (width, height)
+- Polygons have: sides (number of sides), shapeDescription (e.g., "3-sided polygon" = triangle, "4-sided polygon" = square/rectangle, "5-sided polygon" = pentagon)
+- Ellipses have: shapeDescription = "ellipse"
+- Circles: type = "circle", width = diameter
+- Rectangles: type = "rectangle", can be squares if width === height
+- When user says "circles", filter by type: "circle"
+- When user says "squares", filter by type: "rectangle" AND width === height
+- When user says "triangles", filter by type: "polygon" AND sides === 3
+- When user says "polygons", filter by type: "polygon"
+- When arranging by color: use filterColor parameter with hex code or color name
+
+TRIANGLE & POLYGON CREATION:
+- "create a triangle" or "make a triangle" → use createPolygon with sides: 3
+- "draw a red triangle" → createPolygon(sides: 3, color: "#FF0000", x: 0, y: 0, sideLength: 120)
+- "make a pentagon" → createPolygon(sides: 5, ...)
+- "create a hexagon" → createPolygon(sides: 6, ...)
+- Triangles are 3-sided polygons - use createPolygon, NOT createShape
+- Default sideLength for triangles: 120 pixels
+- For other polygons, sideLength: 100 is a good default
 
 IMPORTANT RULES:
 1. For basic commands like "make a red circle" or "draw a circle", create it at origin (0, 0) with default size (120x120)
-2. For relative positioning ("next to it", "beside the last one"), use the LAST object's position and add appropriate offset
-3. Always use proper hex color codes
-4. Circles use width as diameter (height is ignored)
-5. When creating multiple objects in one command, space them 150-200 pixels apart
-6. For UI elements (login forms, nav bars, cards), use createComplex
+2. For triangles: use createPolygon with sides: 3
+3. For relative positioning ("next to it", "beside the last one"), use the LAST object's position and add appropriate offset
+4. Always use proper hex color codes
+5. Circles use width as diameter (height is ignored)
+6. When creating multiple objects in one command, space them 150-200 pixels apart
+7. For UI elements (login forms, nav bars, cards), use createComplex
 6c. **CUSTOM SHAPES - USE TEMPLATES FIRST**:
    - For these shapes, use createCustomShape: cloud, sun, star, castle, smiley, fish
    - "draw a sun" → createCustomShape with shapeName: "sun"
@@ -630,12 +740,14 @@ IMPORTANT RULES:
      * Smiley → Yellow circle (face) + 2 small black circles (eyes) + curved line (smile)
      * Castle → Rectangles for towers, body, door + small rectangles for windows
      * Tree → Brown rectangle (trunk) + green circle or polygon (leaves)
-     * House → Rectangle (body) + polygon/triangle (roof) + rectangle (door) + small rectangles (windows)
+     * House → Rectangle (body) + createPolygon(sides: 3) for roof triangle + rectangle (door) + small rectangles (windows)
      * Flower → Circle (center) + 5-8 circles or ellipses around it (petals)
      * Car → Rectangles (body) + 2 circles (wheels) + rectangles (windows)
    - IMPORTANT: For any new shape, think creatively and combine basics!
-   - Use createCustomShape ONLY for: cloud, sun, star, castle, smiley (pre-built templates)
-   - For everything else: use createShape, createLine, createText multiple times, then createGroup
+   - Use createCustomShape ONLY for: cloud, sun, star, castle, smiley, fish (pre-built templates)
+   - For triangles: use createPolygon(sides: 3) - DO NOT use createCustomShape
+   - For other polygons: use createPolygon with appropriate number of sides
+   - For everything else: use createShape, createPolygon, createLine, createText multiple times, then createGroup
    - After creating multiple parts, ALWAYS group them with a descriptive name
 6d. **CURVED LINES**:
    - Use createLine with curved: true for smiles, arcs, waves
@@ -649,6 +761,16 @@ IMPORTANT RULES:
    - "approximately equal distances apart" → use arrangeShapes with spacing: 200
    - ALWAYS call arrangeShapes after creating multiple objects to space them
    - For grids, use arrangement: "grid" and it will auto-calculate grid dimensions
+6b2. **ARRANGING EXISTING SHAPES - CRITICAL**:
+   - "arrange all the circles in a horizontal line" → arrangeShapes(horizontal, filterType: "circle")
+   - "arrange the squares vertically" → arrangeShapes(vertical, filterType: "square")
+   - "arrange all red shapes in a grid" → arrangeShapes(grid, filterColor: "#FF0000")
+   - "arrange the blue circles horizontally" → arrangeShapes(horizontal, filterType: "circle", filterColor: "#0000FF")
+   - "arrange all triangles" → arrangeShapes(horizontal, filterType: "triangle")
+   - "arrange the polygons" → arrangeShapes(horizontal, filterType: "polygon")
+   - CRITICAL: When user specifies a shape type (circles, squares, triangles, etc.), ALWAYS use filterType parameter!
+   - If user says "arrange all circles", use filterType: "circle" - this ensures ONLY circles are arranged, not other shapes
+   - If user says "arrange the shapes" without specifying type, don't use filterType (arranges all shapes)
 7. **Y-AXIS EXAMPLES**: 
    - User says "move to 200, 200" (top right) → use x: 200, y: -200
    - User says "move to 200, -200" (bottom right) → use x: 200, y: 200
@@ -692,11 +814,12 @@ IMPORTANT RULES:
      * What relative positions?
    - Examples:
      * "Robot" → Rectangle (body) + rectangle (head) + 4 small rectangles (limbs) + circles (eyes)
-     * "Rocket" → Triangle (top) + rectangle (body) + 2 small triangles (fins)
-     * "Ice cream cone" → Triangle (cone) + circle or multiple circles (scoops)
+     * "Rocket" → createPolygon(sides: 3) for top triangle + rectangle (body) + 2 createPolygon(sides: 3) for fins
+     * "Ice cream cone" → createPolygon(sides: 3) for cone triangle + circle or multiple circles (scoops)
      * "Umbrella" → Curved line (canopy arc) + straight line (handle)
-     * "Heart" → 2 circles (top bumps) + polygon (bottom point) OR use multiple circles
-   - BE CREATIVE and use your reasoning to decompose any shape into basics!`
+     * "Heart" → 2 circles (top bumps) + createPolygon(sides: 3) for bottom point OR use multiple circles
+   - BE CREATIVE and use your reasoning to decompose any shape into basics!
+   - Remember: Triangles = createPolygon(sides: 3), NOT createShape or createCustomShape!`
     };
 
     // Add to conversation history
@@ -726,6 +849,11 @@ IMPORTANT RULES:
       }
       
       conversationHistory = [systemMsg, ...recentMessages];
+    }
+
+    // Check if API key is available
+    if (!apiKey) {
+      throw new Error('OpenAI API key is not configured. Please set REACT_APP_OPENAI_API_KEY in your .env.local file and restart the development server.');
     }
 
     const response = await openai.chat.completions.create({
@@ -796,6 +924,33 @@ IMPORTANT RULES:
   } catch (error) {
     console.error('AI Service Error:', error);
     
+    // Check for specific API key errors
+    if (error instanceof Error) {
+      if (error.message.includes('API key') || error.message.includes('401') || error.message.includes('Unauthorized')) {
+        return {
+          success: false,
+          message: 'Invalid or missing OpenAI API key. Please check your .env.local file and restart the development server.',
+          actions: []
+        };
+      }
+      
+      if (error.message.includes('rate limit') || error.message.includes('429')) {
+        return {
+          success: false,
+          message: 'OpenAI API rate limit exceeded. Please try again in a moment.',
+          actions: []
+        };
+      }
+      
+      if (error.message.includes('insufficient_quota') || error.message.includes('billing')) {
+        return {
+          success: false,
+          message: 'OpenAI API quota exceeded. Please check your OpenAI account billing.',
+          actions: []
+        };
+      }
+    }
+    
     // If there's an error with the conversation history, reset it
     if (error instanceof Error && error.message.includes('tool')) {
       console.log('Resetting conversation history due to tool message error');
@@ -804,7 +959,7 @@ IMPORTANT RULES:
     
     return {
       success: false,
-      message: error instanceof Error ? error.message : 'An error occurred processing your command',
+      message: error instanceof Error ? error.message : 'An error occurred processing your command. Please check your API key and try again.',
       actions: []
     };
   }

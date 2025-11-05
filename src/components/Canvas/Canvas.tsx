@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Stage, Layer, Line, Rect, Circle } from 'react-konva';
+import { Stage, Layer, Line, Rect, Circle, Transformer } from 'react-konva';
 import { useCanvas } from '../../contexts/CanvasContext';
 import { useAuth } from '../../contexts/AuthContext';
 import Toolbar from './Toolbar';
@@ -41,6 +41,7 @@ const Canvas: React.FC = () => {
   } = useCanvas();
   const { currentUser } = useAuth();
   const stageRef = useRef<any>(null);
+  const multiTransformerRef = useRef<any>(null);
   const [stageScale, setStageScale] = useState(1.3); // Start at 130% (new 100%)
   const [stagePosition, setStagePosition] = useState({ 
     x: window.innerWidth / 2, 
@@ -359,8 +360,8 @@ const Canvas: React.FC = () => {
 
     // If we clicked on the stage itself (not an object)
     if (e.target === stage) {
-      // Check if shift key is pressed and no objects are selected
-      if (e.evt?.shiftKey && selectedIds.length === 0) {
+      // Check if shift key is pressed - allow selection rectangle with Shift
+      if (e.evt?.shiftKey) {
         const pos = stage.getPointerPosition();
         const scale = stage.scaleX();
         const canvasX = (pos.x - stage.x()) / scale;
@@ -386,10 +387,30 @@ const Canvas: React.FC = () => {
       const selectedObjectIds = objects
         .filter(obj => {
           // Check if object's bounding box intersects with selection rectangle
-          const objLeft = obj.x - (obj.width / 2);
-          const objRight = obj.x + (obj.width / 2);
-          const objTop = obj.y - (obj.height / 2);
-          const objBottom = obj.y + (obj.height / 2);
+          let objLeft: number, objRight: number, objTop: number, objBottom: number;
+          
+          if (obj.type === 'line') {
+            // For lines, check both start and end points
+            objLeft = Math.min(obj.x, obj.x2 || obj.x);
+            objRight = Math.max(obj.x, obj.x2 || obj.x);
+            objTop = Math.min(obj.y, obj.y2 || obj.y);
+            objBottom = Math.max(obj.y, obj.y2 || obj.y);
+          } else if (obj.type === 'circle') {
+            // For circles, x,y is center, radius is width/2
+            const radius = obj.width / 2;
+            objLeft = obj.x - radius;
+            objRight = obj.x + radius;
+            objTop = obj.y - radius;
+            objBottom = obj.y + radius;
+          } else {
+            // For rectangles, images, text: x,y is center (due to offset)
+            const halfWidth = obj.width / 2;
+            const halfHeight = obj.height / 2;
+            objLeft = obj.x - halfWidth;
+            objRight = obj.x + halfWidth;
+            objTop = obj.y - halfHeight;
+            objBottom = obj.y + halfHeight;
+          }
 
           return (
             objLeft < x2 &&
@@ -400,9 +421,22 @@ const Canvas: React.FC = () => {
         })
         .map(obj => obj.id);
 
-      // Select all objects within rectangle
+      // Add to existing selection if Shift is pressed, otherwise replace
       if (selectedObjectIds.length > 0) {
-        selectMultiple(selectedObjectIds);
+        const alreadySelected = selectedObjectIds.filter(id => selectedIds.includes(id));
+        const newSelections = selectedObjectIds.filter(id => !selectedIds.includes(id));
+        
+        if (newSelections.length > 0) {
+          // Add new selections to existing ones
+          selectMultiple([...selectedIds, ...newSelections]);
+        } else if (alreadySelected.length === selectedObjectIds.length) {
+          // All selected objects are already selected - deselect them
+          const remaining = selectedIds.filter(id => !selectedObjectIds.includes(id));
+          selectMultiple(remaining);
+        } else {
+          // Replace selection
+          selectMultiple(selectedObjectIds);
+        }
       }
 
       // Reset selection state
@@ -464,8 +498,8 @@ const Canvas: React.FC = () => {
           setDrawingMode('none');
         }
       } else {
-        // Normal click - check for multi-select modifier
-        const isMultiSelect = e.evt?.ctrlKey || e.evt?.metaKey;
+        // Normal click - check for multi-select modifier (Shift key)
+        const isMultiSelect = e.evt?.shiftKey;
         if (!isMultiSelect) {
           clearSelection();
         }
@@ -635,6 +669,30 @@ const Canvas: React.FC = () => {
     };
   }, [selectedId, selectedIds, objects, drawingMode, setDrawingMode, setTempLineStart, tempLineStart, canvasMousePosition, currentUser, addObject, deleteObject, clearSelection, undo, redo, canUndo, canRedo]);
 
+  // Update multi-select transformer when selection changes
+  useEffect(() => {
+    if (selectedIds.length > 1 && multiTransformerRef.current && stageRef.current) {
+      const stage = stageRef.current;
+      const nodes: any[] = [];
+      
+      // Find all selected shape nodes in the stage
+      selectedIds.forEach(id => {
+        const node = stage.findOne(`#shape-${id}`);
+        if (node) {
+          nodes.push(node);
+        }
+      });
+      
+      if (nodes.length > 0) {
+        multiTransformerRef.current.nodes(nodes);
+        multiTransformerRef.current.getLayer()?.batchDraw();
+      }
+    } else if (multiTransformerRef.current) {
+      // Clear transformer when less than 2 items selected
+      multiTransformerRef.current.nodes([]);
+    }
+  }, [selectedIds]);
+
   return (
     <div style={{ 
       width: '100vw', 
@@ -653,10 +711,11 @@ const Canvas: React.FC = () => {
       }}>
       <CursorOverlay stageRef={stageRef} />
       
+      {/* @ts-ignore - Stage accepts children (Layer components) but types may not reflect this */}
       <Stage
         ref={stageRef}
         width={window.innerWidth}
-          height={window.innerHeight - 60} // Account for toolbar height
+        height={window.innerHeight - 60} // Account for toolbar height
         scaleX={stageScale}
         scaleY={stageScale}
         x={stagePosition.x}
@@ -665,7 +724,7 @@ const Canvas: React.FC = () => {
         onClick={handleStageClick}
         onMouseDown={handleStageMouseDown}
         onMouseUp={handleStageMouseUp}
-          onMouseMove={handleMouseMove}
+        onMouseMove={handleMouseMove}
         onWheel={handleWheel}
       >
           {/* Grid Layer */}
@@ -758,7 +817,34 @@ const Canvas: React.FC = () => {
                 lineCap="round"
               />
             )}
-        </Layer>
+          </Layer>
+          
+          {/* Multi-select Transformer Layer */}
+          {selectedIds.length > 1 && (
+            <Layer>
+              <Transformer
+                ref={multiTransformerRef}
+                nodes={objects
+                  .filter(obj => selectedIds.includes(obj.id))
+                  .map(obj => {
+                    // Find the shape ref from the rendered objects
+                    // We need to get the actual Konva nodes
+                    const stage = stageRef.current;
+                    if (!stage) return null;
+                    const layer = stage.findOne(`#shape-${obj.id}`);
+                    return layer;
+                  })
+                  .filter(Boolean)}
+                boundBoxFunc={(oldBox: { x: number; y: number; width: number; height: number }, newBox: { x: number; y: number; width: number; height: number }) => {
+                  // Limit resize
+                  if (Math.abs(newBox.width) < 5 || Math.abs(newBox.height) < 5) {
+                    return oldBox;
+                  }
+                  return newBox;
+                }}
+              />
+            </Layer>
+          )}
       </Stage>
         
         {/* Zoom controls on left side */}

@@ -20,6 +20,7 @@ const ChatWindow: React.FC = () => {
   const [progress, setProgress] = useState(0);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [activeSuggestions, setActiveSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(true); // Toggle for AI suggestions
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -234,6 +235,36 @@ const ChatWindow: React.FC = () => {
               fontStyle: 'normal',
               textAlign: 'left',
               nickname: '',
+              zIndex: objects.length,
+              shadow: false,
+              createdBy: currentUser.uid
+            });
+            break;
+
+          case 'createPolygon':
+            // Create a polygon (triangle, pentagon, hexagon, etc.)
+            const sides = action.data.sides || 3;
+            const sideLength = action.data.sideLength || (sides === 3 ? 120 : 100);
+            const polygonX = action.data.x || 0;
+            const polygonY = action.data.y || 0;
+            const polygonColor = action.data.color || '#3b82f6';
+            
+            // Calculate bounding box for polygon
+            // For regular polygons, the radius from center to vertex is:
+            // radius = sideLength / (2 * sin(π / sides))
+            const radius = sideLength / (2 * Math.sin(Math.PI / sides));
+            const boundingSize = radius * 2;
+            
+            await addObject({
+              type: 'polygon',
+              x: polygonX,
+              y: polygonY,
+              width: action.data.width || boundingSize,
+              height: action.data.height || boundingSize,
+              fill: polygonColor,
+              sides: sides,
+              sideLength: sideLength,
+              nickname: sides === 3 ? 'Triangle' : `${sides}-sided Polygon`,
               zIndex: objects.length,
               shadow: false,
               createdBy: currentUser.uid
@@ -518,9 +549,67 @@ const ChatWindow: React.FC = () => {
 
           case 'arrangeShapes':
             // Arrange existing shapes in specified pattern
-            const shapesToArrange = objects.filter(obj => 
-              obj.type === 'rectangle' || obj.type === 'circle'
-            );
+            let shapesToArrange = objects.filter(obj => {
+              // Filter by type if specified
+              if (action.data.filterType) {
+                const filterType = action.data.filterType.toLowerCase();
+                
+                // Handle special cases
+                if (filterType === 'square') {
+                  // Squares are rectangles with equal width and height
+                  if (obj.type !== 'rectangle') return false;
+                  if (Math.abs(obj.width - obj.height) > 1) return false; // Allow small floating point differences
+                } else if (filterType === 'triangle') {
+                  // Triangles are 3-sided polygons
+                  if (obj.type !== 'polygon') return false;
+                  if (obj.sides !== 3) return false;
+                } else if (filterType === 'polygon') {
+                  // All polygons (3+ sides)
+                  if (obj.type !== 'polygon') return false;
+                } else {
+                  // Direct type match
+                  if (obj.type !== filterType) return false;
+                }
+              } else {
+                // If no filter type specified, only arrange rectangles and circles by default
+                // (to avoid accidentally moving text, images, etc.)
+                if (obj.type !== 'rectangle' && obj.type !== 'circle' && obj.type !== 'polygon' && obj.type !== 'ellipse') {
+                  return false;
+                }
+              }
+              
+              // Filter by color if specified
+              if (action.data.filterColor) {
+                const filterColor = action.data.filterColor.toLowerCase();
+                const objColor = (obj.fill || '').toLowerCase();
+                
+                // Color name to hex mapping
+                const colorMap: { [key: string]: string } = {
+                  'red': '#ff0000', 'blue': '#0000ff', 'green': '#00ff00',
+                  'yellow': '#ffff00', 'purple': '#800080', 'orange': '#ffa500',
+                  'black': '#000000', 'white': '#ffffff', 'gray': '#808080', 'grey': '#808080',
+                  'pink': '#ffc0cb'
+                };
+                
+                // Check if filterColor is a color name
+                if (colorMap[filterColor]) {
+                  if (objColor !== colorMap[filterColor]) return false;
+                } else {
+                  // Direct hex match
+                  if (objColor !== filterColor) return false;
+                }
+              }
+              
+              return true;
+            });
+            
+            // Sort by creation time or current position to maintain order
+            shapesToArrange.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+            
+            if (shapesToArrange.length === 0) {
+              console.log('No shapes found matching filter criteria');
+              break;
+            }
             
             const spacing = action.data.spacing || 200; // Default 200px center-to-center spacing
             const startX = action.data.startX || -200;
@@ -551,6 +640,8 @@ const ChatWindow: React.FC = () => {
                 });
               });
             }
+            
+            console.log(`Arranged ${shapesToArrange.length} shapes (filter: type=${action.data.filterType || 'all'}, color=${action.data.filterColor || 'all'})`);
             break;
 
           case 'createCustomShape':
@@ -2151,7 +2242,7 @@ const ChatWindow: React.FC = () => {
       )}
 
       {/* AI Suggestions (clickable) */}
-      {isAIMode && activeSuggestions.length > 0 && (
+      {isAIMode && showSuggestions && activeSuggestions.length > 0 && (
         <div
           style={{
             padding: '12px 16px',
@@ -2230,7 +2321,9 @@ const ChatWindow: React.FC = () => {
           borderTop: '1px solid #e5e7eb',
           background: 'white',
           display: 'flex',
-          justifyContent: 'center'
+          justifyContent: 'center',
+          gap: '8px',
+          alignItems: 'center'
         }}
       >
         <button
@@ -2262,6 +2355,22 @@ const ChatWindow: React.FC = () => {
           <span style={{ fontSize: '16px' }}>🤖</span>
           {isAIMode ? 'AI Mode Active' : 'Enable AI Mode'}
         </button>
+        
+        {/* AI Suggestions Toggle - Checkbox */}
+        {isAIMode && (
+          <input
+            type="checkbox"
+            checked={showSuggestions}
+            onChange={() => setShowSuggestions(!showSuggestions)}
+            style={{
+              width: '18px',
+              height: '18px',
+              cursor: 'pointer',
+              accentColor: '#10b981'
+            }}
+            title={showSuggestions ? 'Hide AI Suggestions' : 'Show AI Suggestions'}
+          />
+        )}
       </div>
 
       {/* Input Area */}

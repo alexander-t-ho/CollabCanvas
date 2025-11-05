@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Ellipse, Group, Transformer } from 'react-konva';
+import Konva from 'konva';
 import { useCanvas } from '../../contexts/CanvasContext';
 import { CanvasObject } from '../../types';
 
@@ -11,7 +12,7 @@ interface EllipseShapeProps {
 }
 
 const EllipseShape: React.FC<EllipseShapeProps> = ({ object, isSelected, onDrag, onDragEnd }) => {
-  const { updateObject, saveHistoryNow, selectObject } = useCanvas();
+  const { updateObject, selectObject, selectedIds, addToSelection, removeFromSelection } = useCanvas();
   const groupRef = useRef<any>(null);
   const transformerRef = useRef<any>(null);
 
@@ -28,7 +29,17 @@ const EllipseShape: React.FC<EllipseShapeProps> = ({ object, isSelected, onDrag,
 
   const handleClick = (e: any) => {
     e.cancelBubble = true;
-    selectObject(object.id);
+    const isMultiSelect = e.evt?.shiftKey;
+    
+    if (isMultiSelect) {
+      if (selectedIds.includes(object.id)) {
+        removeFromSelection(object.id);
+      } else {
+        addToSelection(object.id);
+      }
+    } else {
+      selectObject(object.id);
+    }
   };
 
   const handleTransform = (e: any) => {
@@ -90,24 +101,25 @@ const EllipseShape: React.FC<EllipseShapeProps> = ({ object, isSelected, onDrag,
     }
 
     updateObject(object.id, updates);
-    setTimeout(() => saveHistoryNow(), 300);
+    // History is automatically saved by updateObject command
   };
 
   return (
     <>
       <Group
+        id={`shape-${object.id}`}
         ref={groupRef}
         x={object.x}
         y={object.y}
         rotation={object.rotation || 0}
         draggable
         onClick={handleClick}
-        onDragMove={(e) => {
+        onDragMove={(e: Konva.KonvaEventObject<DragEvent>) => {
           if (onDrag) {
             onDrag({ x: e.target.x(), y: e.target.y() });
           }
         }}
-        onDragEnd={(e) => {
+        onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => {
           updateObject(object.id, {
             x: Math.round(e.target.x()),
             y: Math.round(e.target.y())
@@ -117,7 +129,7 @@ const EllipseShape: React.FC<EllipseShapeProps> = ({ object, isSelected, onDrag,
             onDragEnd();
           }
           
-          setTimeout(() => saveHistoryNow(), 300);
+          // History is automatically saved by updateObject command
         }}
         onTransform={handleTransform}
         onTransformEnd={handleTransformEnd}
@@ -136,8 +148,8 @@ const EllipseShape: React.FC<EllipseShapeProps> = ({ object, isSelected, onDrag,
 
       </Group>
       
-      {/* Transformer for rotation and resize */}
-      {isSelected && (
+      {/* Transformer for rotation and resize - only for single selection */}
+      {isSelected && selectedIds.length === 1 && (
         <Transformer
           ref={transformerRef}
           rotateEnabled={true}

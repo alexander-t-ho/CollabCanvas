@@ -12,7 +12,7 @@ interface Props {
 }
 
 const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }) => {
-  const { updateObject, updateObjectLive, selectObject, selectedIds, addToSelection, removeFromSelection, objects, saveHistoryNow } = useCanvas();
+  const { updateObject, updateObjectLive, selectObject, selectedIds, addToSelection, removeFromSelection, objects } = useCanvas();
   const shapeRef = useRef<any>(null);
   const transformerRef = useRef<any>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -24,9 +24,9 @@ const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }
     }
   }, [isSelected]);
 
-  // Handle click with multi-selection support
+  // Handle click with multi-selection support (Shift key)
   const handleClick = (e: any) => {
-    const isMultiSelect = e.evt?.ctrlKey || e.evt?.metaKey;
+    const isMultiSelect = e.evt?.shiftKey;
     
     if (isMultiSelect) {
       if (selectedIds.includes(object.id)) {
@@ -202,8 +202,7 @@ const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }
       onDragEnd();
     }
     
-    // Save to history after all updates complete
-    setTimeout(() => saveHistoryNow(), 300);
+    // History is automatically saved by updateObject command
   };
 
   const handleTransform = (e: any) => {
@@ -379,8 +378,7 @@ const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }
       }
     }
     
-    // Save to history after all updates complete
-    setTimeout(() => saveHistoryNow(), 300);
+    // History is automatically saved by updateObject command
   };
 
   const renderShape = () => {
@@ -388,6 +386,7 @@ const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }
       case 'rectangle':
         return (
           <Rect
+            id={`shape-${object.id}`}
             ref={shapeRef}
             x={object.x}
             y={object.y}
@@ -415,6 +414,7 @@ const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }
       case 'circle':
         return (
           <Circle
+            id={`shape-${object.id}`}
             ref={shapeRef}
             x={object.x}
             y={object.y}
@@ -446,6 +446,7 @@ const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }
       case 'image':
         return image ? (
           <KonvaImage
+            id={`shape-${object.id}`}
             ref={shapeRef}
             x={object.x}
             y={object.y}
@@ -473,6 +474,7 @@ const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }
       case 'text':
         return (
           <Text
+            id={`shape-${object.id}`}
             ref={shapeRef}
             x={object.x}
             y={object.y}
@@ -503,6 +505,7 @@ const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }
       case 'group':
         return (
           <Rect
+            id={`shape-${object.id}`}
             ref={shapeRef}
             x={object.x}
             y={object.y}
@@ -530,7 +533,8 @@ const CanvasObject: React.FC<Props> = ({ object, isSelected, onDrag, onDragEnd }
   return (
     <>
       {renderShape()}
-      {isSelected && object.type !== 'line' && <Transformer ref={transformerRef} />}
+      {/* Only show transformer for single selection (not multi-select) */}
+      {isSelected && selectedIds.length === 1 && object.type !== 'line' && <Transformer ref={transformerRef} />}
     </>
   );
 };

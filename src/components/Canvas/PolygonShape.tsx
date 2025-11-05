@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Line, Circle, Group, Transformer } from 'react-konva';
+import Konva from 'konva';
 import { useCanvas } from '../../contexts/CanvasContext';
 import { CanvasObject } from '../../types';
 
@@ -11,10 +12,11 @@ interface PolygonShapeProps {
 }
 
 const PolygonShape: React.FC<PolygonShapeProps> = ({ object, isSelected, onDrag, onDragEnd }) => {
-  const { updateObject, saveHistoryNow, selectObject } = useCanvas();
+  const { updateObject, updateObjectLive, selectObject, selectedIds, addToSelection, removeFromSelection } = useCanvas();
   const groupRef = useRef<any>(null);
   const transformerRef = useRef<any>(null);
   const [isDraggingVertex, setIsDraggingVertex] = React.useState(false);
+  const draggedVertexIndexRef = React.useRef<number | null>(null);
 
   // Attach transformer when selected
   useEffect(() => {
@@ -133,9 +135,10 @@ const PolygonShape: React.FC<PolygonShapeProps> = ({ object, isSelected, onDrag,
   const points = calculatePolygonPoints();
   const vertices = calculateVertices();
 
-  const handleVertexDragStart = (e: any) => {
+  const handleVertexDragStart = (index: number) => (e: any) => {
     e.cancelBubble = true;
     setIsDraggingVertex(true);
+    draggedVertexIndexRef.current = index;
     
     // Disable polygon dragging when dragging a vertex
     if (groupRef.current) {
@@ -166,7 +169,8 @@ const PolygonShape: React.FC<PolygonShapeProps> = ({ object, isSelected, onDrag,
     // Update the dragged vertex position
     currentVertices[index] = { x: newX, y: newY };
     
-    updateObject(object.id, {
+    // Use updateObjectLive for real-time feedback during drag (no history)
+    updateObjectLive(object.id, {
       customVertices: currentVertices,
       selectedSide: index // Also select this side
     });
@@ -183,7 +187,34 @@ const PolygonShape: React.FC<PolygonShapeProps> = ({ object, isSelected, onDrag,
       groupRef.current.draggable(true);
     }
     
-    saveHistoryNow();
+    // Save final position to history using updateObject (creates command)
+    const index = draggedVertexIndexRef.current;
+    if (index === null) return;
+    
+    const newX = e.target.x();
+    const newY = e.target.y();
+    
+    // Get current vertices from the object (which may have been updated during drag via updateObjectLive)
+    const currentCustomVertices = object.customVertices || [];
+    let currentVertices: Array<{ x: number; y: number }>;
+    
+    if (currentCustomVertices.length === sides) {
+      // Use existing custom vertices
+      currentVertices = currentCustomVertices.map(v => ({ x: v.x, y: v.y }));
+    } else {
+      // Initialize from base vertices calculation
+      currentVertices = vertices.map(v => ({ x: v.x, y: v.y }));
+    }
+    
+    // Update the dragged vertex position
+    currentVertices[index] = { x: newX, y: newY };
+    
+    updateObject(object.id, {
+      customVertices: currentVertices,
+      selectedSide: index
+    });
+    
+    draggedVertexIndexRef.current = null;
   };
 
   const handleVertexClick = (index: number, e: any) => {
@@ -200,7 +231,17 @@ const PolygonShape: React.FC<PolygonShapeProps> = ({ object, isSelected, onDrag,
 
   const handleClick = (e: any) => {
     e.cancelBubble = true;
-    selectObject(object.id);
+    const isMultiSelect = e.evt?.shiftKey;
+    
+    if (isMultiSelect) {
+      if (selectedIds.includes(object.id)) {
+        removeFromSelection(object.id);
+      } else {
+        addToSelection(object.id);
+      }
+    } else {
+      selectObject(object.id);
+    }
   };
 
   const handleTransform = (e: any) => {
@@ -275,24 +316,25 @@ const PolygonShape: React.FC<PolygonShapeProps> = ({ object, isSelected, onDrag,
     }
 
     updateObject(object.id, updates);
-    setTimeout(() => saveHistoryNow(), 300);
+    // History is automatically saved by updateObject command
   };
 
   return (
     <>
       <Group
+        id={`shape-${object.id}`}
         ref={groupRef}
         x={object.x}
         y={object.y}
         rotation={object.rotation || 0}
         draggable
         onClick={handleClick}
-        onDragMove={(e) => {
+        onDragMove={(e: Konva.KonvaEventObject<DragEvent>) => {
           if (onDrag) {
             onDrag({ x: e.target.x(), y: e.target.y() });
           }
         }}
-        onDragEnd={(e) => {
+        onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => {
           updateObject(object.id, {
             x: Math.round(e.target.x()),
             y: Math.round(e.target.y())
@@ -302,7 +344,7 @@ const PolygonShape: React.FC<PolygonShapeProps> = ({ object, isSelected, onDrag,
             onDragEnd();
           }
           
-          setTimeout(() => saveHistoryNow(), 300);
+          // History is automatically saved by updateObject command
         }}
         onTransform={handleTransform}
         onTransformEnd={handleTransformEnd}
@@ -346,15 +388,15 @@ const PolygonShape: React.FC<PolygonShapeProps> = ({ object, isSelected, onDrag,
             stroke="#ffffff"
             strokeWidth={2}
             draggable
-            onDragStart={handleVertexDragStart}
-            onDragMove={(e) => handleVertexDrag(idx, e)}
+            onDragStart={handleVertexDragStart(idx)}
+            onDragMove={(e: Konva.KonvaEventObject<DragEvent>) => handleVertexDrag(idx, e)}
             onDragEnd={handleVertexDragEnd}
-            onClick={(e) => handleVertexClick(idx, e)}
-            onMouseEnter={(e) => {
+            onClick={(e: Konva.KonvaEventObject<MouseEvent>) => handleVertexClick(idx, e)}
+            onMouseEnter={(e: Konva.KonvaEventObject<MouseEvent>) => {
               e.target.setAttr('radius', 10);
               e.target.getLayer()?.batchDraw();
             }}
-            onMouseLeave={(e) => {
+            onMouseLeave={(e: Konva.KonvaEventObject<MouseEvent>) => {
               e.target.setAttr('radius', 8);
               e.target.getLayer()?.batchDraw();
             }}
@@ -363,8 +405,8 @@ const PolygonShape: React.FC<PolygonShapeProps> = ({ object, isSelected, onDrag,
       ))}
       </Group>
       
-      {/* Transformer for rotation and resize handles */}
-      {isSelected && !isDraggingVertex && (
+      {/* Transformer for rotation and resize handles - only for single selection */}
+      {isSelected && selectedIds.length === 1 && !isDraggingVertex && (
         <Transformer
           ref={transformerRef}
           rotateEnabled={true}

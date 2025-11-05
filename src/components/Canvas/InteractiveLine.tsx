@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Group, Line, Circle, Arrow } from 'react-konva';
+import Konva from 'konva';
 import { CanvasObject } from '../../types';
 import { useCanvas } from '../../contexts/CanvasContext';
 
@@ -9,7 +10,7 @@ interface Props {
 }
 
 const InteractiveLine: React.FC<Props> = ({ object, isSelected }) => {
-  const { updateObject, selectObject, saveHistoryNow } = useCanvas();
+  const { updateObject, updateObjectLive, selectObject, selectedIds, addToSelection, removeFromSelection } = useCanvas();
   const groupRef = useRef<any>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragType, setDragType] = useState<'start' | 'end' | 'control' | null>(null);
@@ -84,23 +85,24 @@ const InteractiveLine: React.FC<Props> = ({ object, isSelected }) => {
     const newY = e.target.y();
     const isShiftPressed = e.evt?.shiftKey || false;
 
+    // Use updateObjectLive for real-time feedback during drag (no history)
     switch (pointType) {
       case 'start':
         // Only update the start point, keep end point locked
         if (isShiftPressed) {
           const snapped = snapToOrthogonal(endX, endY, newX, newY);
-          updateObject(object.id, { x: snapped.x, y: snapped.y });
+          updateObjectLive(object.id, { x: snapped.x, y: snapped.y });
         } else {
-          updateObject(object.id, { x: newX, y: newY });
+          updateObjectLive(object.id, { x: newX, y: newY });
         }
         break;
       case 'end':
         // Only update the end point, keep start point locked
         if (isShiftPressed) {
           const snapped = snapToOrthogonal(startX, startY, newX, newY);
-          updateObject(object.id, { x2: snapped.x, y2: snapped.y });
+          updateObjectLive(object.id, { x2: snapped.x, y2: snapped.y });
         } else {
-          updateObject(object.id, { x2: newX, y2: newY });
+          updateObjectLive(object.id, { x2: newX, y2: newY });
         }
         break;
       case 'control':
@@ -111,14 +113,14 @@ const InteractiveLine: React.FC<Props> = ({ object, isSelected }) => {
           const midX = (startX + endX) / 2;
           const midY = (startY + endY) / 2;
           // console.log('🔥 LINE: Shift pressed - aligning control point to midpoint', midX, midY);
-          updateObject(object.id, { 
+          updateObjectLive(object.id, { 
             controlX: midX, 
             controlY: midY,
             curved: false // Straighten the line
           });
         } else {
           // console.log('🔥 LINE: Moving control point to', newX, newY);
-          updateObject(object.id, { 
+          updateObjectLive(object.id, { 
             controlX: newX, 
             controlY: newY,
             curved: true 
@@ -177,7 +179,7 @@ const InteractiveLine: React.FC<Props> = ({ object, isSelected }) => {
       }
       
       // Save to history after line point drag ends
-      setTimeout(() => saveHistoryNow(), 300);
+      // History is automatically saved by updateObject command
     };
 
   // Handle dragging the entire line (only when clicking on the line itself, not control points)
@@ -208,7 +210,7 @@ const InteractiveLine: React.FC<Props> = ({ object, isSelected }) => {
       e.target.y(0);
       
       // Save to history after line drag ends
-      setTimeout(() => saveHistoryNow(), 300);
+      // History is automatically saved by updateObject command
     } catch (error) {
       // console.error('❌ LINE: Error moving line:', error);
       // Reset position on error
@@ -315,12 +317,26 @@ const InteractiveLine: React.FC<Props> = ({ object, isSelected }) => {
     );
   };
 
+  const handleLineClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    const isMultiSelect = e.evt?.shiftKey;
+    
+    if (isMultiSelect) {
+      if (selectedIds.includes(object.id)) {
+        removeFromSelection(object.id);
+      } else {
+        addToSelection(object.id);
+      }
+    } else {
+      selectObject(object.id);
+    }
+  };
+
   return (
     <Group
       ref={groupRef}
       draggable={!isDragging && dragType === null} // Only allow dragging when NO control points are being dragged
       onDragEnd={handleLineDragEnd}
-      onClick={() => selectObject(object.id)}
+      onClick={handleLineClick}
     >
       {renderLine()}
       
@@ -339,10 +355,10 @@ const InteractiveLine: React.FC<Props> = ({ object, isSelected }) => {
             onDragStart={handleControlPointDragStart('start')}
             onDragMove={handleControlPointDragMove('start')}
             onDragEnd={handleControlPointDragEnd('start')}
-            onMouseEnter={(e) => {
+            onMouseEnter={(e: Konva.KonvaEventObject<MouseEvent>) => {
               e.target.scale({ x: 1.2, y: 1.2 });
             }}
-            onMouseLeave={(e) => {
+            onMouseLeave={(e: Konva.KonvaEventObject<MouseEvent>) => {
               e.target.scale({ x: 1, y: 1 });
             }}
           />
@@ -359,10 +375,10 @@ const InteractiveLine: React.FC<Props> = ({ object, isSelected }) => {
             onDragStart={handleControlPointDragStart('end')}
             onDragMove={handleControlPointDragMove('end')}
             onDragEnd={handleControlPointDragEnd('end')}
-            onMouseEnter={(e) => {
+            onMouseEnter={(e: Konva.KonvaEventObject<MouseEvent>) => {
               e.target.scale({ x: 1.2, y: 1.2 });
             }}
-            onMouseLeave={(e) => {
+            onMouseLeave={(e: Konva.KonvaEventObject<MouseEvent>) => {
               e.target.scale({ x: 1, y: 1 });
             }}
           />
@@ -379,10 +395,10 @@ const InteractiveLine: React.FC<Props> = ({ object, isSelected }) => {
             onDragStart={handleControlPointDragStart('control')}
             onDragMove={handleControlPointDragMove('control')}
             onDragEnd={handleControlPointDragEnd('control')}
-            onMouseEnter={(e) => {
+            onMouseEnter={(e: Konva.KonvaEventObject<MouseEvent>) => {
               e.target.scale({ x: 1.2, y: 1.2 });
             }}
-            onMouseLeave={(e) => {
+            onMouseLeave={(e: Konva.KonvaEventObject<MouseEvent>) => {
               e.target.scale({ x: 1, y: 1 });
             }}
           />
