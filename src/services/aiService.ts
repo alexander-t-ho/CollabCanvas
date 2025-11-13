@@ -1,25 +1,26 @@
 import OpenAI from 'openai';
 import { CanvasObject } from '../types';
 
-// Get API key from environment
-const apiKey = process.env.REACT_APP_OPENAI_API_KEY;
+// Get API key from environment (Open Router)
+const apiKey = process.env.REACT_APP_OPENROUTER_API_KEY;
 
 // Validate API key exists
 if (!apiKey) {
-  console.error('❌ OPENAI_API_KEY is not set in environment variables');
-  console.error('Please set REACT_APP_OPENAI_API_KEY in your .env.local file');
+  console.error('❌ OPENROUTER_API_KEY is not set in environment variables');
+  console.error('Please set REACT_APP_OPENROUTER_API_KEY in your .env.local file');
 } else {
-  // Validate API key format (should start with 'sk-')
-  if (!apiKey.startsWith('sk-')) {
-    console.warn('⚠️ OPENAI_API_KEY format may be incorrect. Expected format: sk-...');
+  // Validate API key format (should start with 'sk-or-v1-')
+  if (!apiKey.startsWith('sk-or-v1-')) {
+    console.warn('⚠️ OPENROUTER_API_KEY format may be incorrect. Expected format: sk-or-v1-...');
   } else {
-    console.log('✅ OpenAI API key loaded successfully');
+    console.log('✅ Open Router API key loaded successfully');
   }
 }
 
-// Initialize OpenAI client
+// Initialize OpenAI client with Open Router
 const openai = new OpenAI({
   apiKey: apiKey || '', // Fallback to empty string if not set
+  baseURL: 'https://openrouter.ai/api/v1',
   dangerouslyAllowBrowser: true // Only for demo - in production, use a backend
 });
 
@@ -853,11 +854,11 @@ IMPORTANT RULES:
 
     // Check if API key is available
     if (!apiKey) {
-      throw new Error('OpenAI API key is not configured. Please set REACT_APP_OPENAI_API_KEY in your .env.local file and restart the development server.');
+      throw new Error('Open Router API key is not configured. Please set REACT_APP_OPENROUTER_API_KEY in your .env.local file and restart the development server.');
     }
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
+      model: 'openai/gpt-4-turbo-preview',
       messages: conversationHistory,
       tools,
       tool_choice: 'auto',
