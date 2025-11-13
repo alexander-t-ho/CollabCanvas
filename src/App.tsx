@@ -1,10 +1,11 @@
 import React from 'react';
-import './App.css';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AuthProvider } from './contexts/AuthContext';
 import { CanvasProvider } from './contexts/CanvasContext';
 import { UserProfileProvider } from './contexts/UserProfileContext';
-import Login from './components/Auth/Login';
 import Canvas from './components/Canvas/Canvas';
+import Login from './components/Auth/Login';
+import { useAuth } from './contexts/AuthContext';
+import './App.css';
 
 const AppContent: React.FC = () => {
   const { currentUser, loading } = useAuth();
@@ -21,21 +22,20 @@ const AppContent: React.FC = () => {
     return <Login />;
   }
 
+  return <Canvas />;
+};
+
+const App: React.FC = () => {
   return (
-    <CanvasProvider>
-      <UserProfileProvider>
-        <Canvas />
-      </UserProfileProvider>
-    </CanvasProvider>
+    <AuthProvider>
+      <CanvasProvider>
+        <UserProfileProvider>
+          <AppContent />
+        </UserProfileProvider>
+      </CanvasProvider>
+    </AuthProvider>
   );
 };
 
-function App() {
-  return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
-}
-
 export default App;
+
